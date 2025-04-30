@@ -51,8 +51,8 @@ def compare_images(img1, img2):
 def compare():
     data = request.get_json()
 
-    document_base64 = data.get("document_image", "")
-    reference_base64 = data.get("reference_signature", "")
+    document_base64 = data.get("image1", "")
+    reference_base64 = data.get("image2", "")
 
     if not document_base64 or not reference_base64:
         return jsonify({"error": "Both document_image and reference_signature are required"}), 400
