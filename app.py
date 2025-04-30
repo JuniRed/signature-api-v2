@@ -21,11 +21,13 @@ def decode_base64_to_image(base64_string):
 
 def preprocess_image(img):
     try:
-        # Resize and denoise
+        # Resize for consistency (to a fixed width and height)
         img = cv2.resize(img, (400, 200))
+
+        # Apply Gaussian blur to reduce noise
         img = cv2.GaussianBlur(img, (5, 5), 0)
 
-        # Improve contrast with adaptive thresholding
+        # Apply adaptive thresholding to improve contrast
         img = cv2.adaptiveThreshold(
             img, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
             cv2.THRESH_BINARY_INV, 11, 2
@@ -40,21 +42,32 @@ def compare_signatures_orb(img1, img2):
         img1 = preprocess_image(img1)
         img2 = preprocess_image(img2)
 
+        # Resize both images to the same scale
+        height1, width1 = img1.shape
+        height2, width2 = img2.shape
+
+        # If the images are of different sizes, resize the larger one to match the smaller one
+        if height1 != height2 or width1 != width2:
+            img2 = cv2.resize(img2, (width1, height1))
+
+        # Initialize ORB detector
         orb = cv2.ORB_create(nfeatures=1000)
 
         kp1, des1 = orb.detectAndCompute(img1, None)
         kp2, des2 = orb.detectAndCompute(img2, None)
 
-        print(f"Keypoints img1: {len(kp1) if kp1 else 0}, img2: {len(kp2) if kp2 else 0}")
-
         if des1 is None or des2 is None:
+            print("Error: No descriptors found in one of the images.")
             return 0.0
 
+        # Use BFMatcher to match the descriptors
         bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
         matches = bf.match(des1, des2)
 
+        # Filter matches by distance (good matches)
         good_matches = [m for m in matches if m.distance < 60]
 
+        # Match ratio
         match_ratio = len(good_matches) / max(len(kp1), len(kp2))
         similarity = round(match_ratio * 100, 2)
 
@@ -67,8 +80,8 @@ def compare_signatures_orb(img1, img2):
 def compare():
     data = request.get_json()
 
-    document_base64 = data.get("image1", "")
-    reference_base64 = data.get("image2", "")
+    document_base64 = data.get("document_image", "")
+    reference_base64 = data.get("reference_signature", "")
 
     if not document_base64 or not reference_base64:
         return jsonify({"error": "Both images are required"}), 400
@@ -83,7 +96,7 @@ def compare():
 
     return jsonify({
         "similarity": similarity,
-        "match": similarity >= 40
+        "match": similarity >= 40  # Threshold can be adjusted based on testing
     }), 200
 
 if __name__ == '__main__':
