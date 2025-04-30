@@ -22,41 +22,44 @@ def decode_base64_to_image(base64_string):
 def extract_signature_region(image):
     try:
         height, width = image.shape
-        # Crop the bottom 25% of the document
         crop_y_start = int(height * 0.75)
         cropped = image[crop_y_start:height, 0:width]
 
-        # Threshold to extract ink
         _, thresh = cv2.threshold(cropped, 200, 255, cv2.THRESH_BINARY_INV)
-
-        # Find contours (ink areas)
         contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
         if contours:
-            # Take the largest contour assuming it's the signature
             x, y, w, h = cv2.boundingRect(max(contours, key=cv2.contourArea))
-            signature = cropped[y:y+h, x:x+w]
-            return signature
+            return cropped[y:y+h, x:x+w]
         else:
-            # Fallback: return the entire bottom-cropped area
             return cropped
-
     except Exception as e:
         print(f"Error extracting signature: {e}")
         return None
 
-def compare_images(img1, img2):
+def compare_signatures_orb(img1, img2):
     try:
-        # Resize to same size
-        if img1.shape != img2.shape:
-            img2 = cv2.resize(img2, (img1.shape[1], img1.shape[0]))
-        diff = cv2.absdiff(img1, img2)
-        non_zero_count = np.count_nonzero(diff)
-        total_pixels = img1.size
-        similarity = 100 - (non_zero_count / total_pixels * 100)
-        return round(similarity, 2)
+        orb = cv2.ORB_create()
+
+        kp1, des1 = orb.detectAndCompute(img1, None)
+        kp2, des2 = orb.detectAndCompute(img2, None)
+
+        if des1 is None or des2 is None:
+            return 0.0
+
+        bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
+        matches = bf.match(des1, des2)
+
+        # Calculate similarity score based on good matches
+        matches = sorted(matches, key=lambda x: x.distance)
+        good_matches = [m for m in matches if m.distance < 50]
+
+        match_ratio = len(good_matches) / max(len(kp1), len(kp2))
+        similarity = round(match_ratio * 100, 2)
+
+        return similarity
     except Exception as e:
-        print(f"Error comparing images: {e}")
+        print(f"Error comparing signatures with ORB: {e}")
         return 0.0
 
 @app.route('/compare', methods=['POST'])
@@ -80,11 +83,11 @@ def compare():
     if signature_region is None:
         return jsonify({"error": "No signature found in document image"}), 400
 
-    similarity = compare_images(signature_region, reference_img)
+    similarity = compare_signatures_orb(signature_region, reference_img)
 
     return jsonify({
         "similarity": similarity,
-        "match": similarity >= 80  # Threshold for match decision
+        "match": similarity >= 40  # ORB match threshold
     }), 200
 
 if __name__ == '__main__':
