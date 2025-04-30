@@ -13,11 +13,27 @@ def decode_base64_to_image(base64_string):
         if "," in base64_string:
             base64_string = base64_string.split(",")[1]
         img_data = base64.b64decode(base64_string)
-        img = Image.open(BytesIO(img_data)).convert("L")  # Convert to grayscale
+        img = Image.open(BytesIO(img_data)).convert("L")
         return np.array(img)
     except Exception as e:
         print(f"Error decoding image: {e}")
         return None
+
+def preprocess_image(img):
+    try:
+        # Resize for consistency
+        img = cv2.resize(img, (400, 200))
+
+        # Apply Gaussian blur to reduce noise
+        img = cv2.GaussianBlur(img, (5, 5), 0)
+
+        # Binarize the image to enhance signature
+        _, thresh = cv2.threshold(img, 180, 255, cv2.THRESH_BINARY_INV)
+
+        return thresh
+    except Exception as e:
+        print(f"Preprocessing failed: {e}")
+        return img
 
 def extract_signature_region(image):
     try:
@@ -30,7 +46,8 @@ def extract_signature_region(image):
 
         if contours:
             x, y, w, h = cv2.boundingRect(max(contours, key=cv2.contourArea))
-            return cropped[y:y+h, x:x+w]
+            signature = cropped[y:y+h, x:x+w]
+            return signature
         else:
             return cropped
     except Exception as e:
@@ -39,21 +56,22 @@ def extract_signature_region(image):
 
 def compare_signatures_orb(img1, img2):
     try:
-        orb = cv2.ORB_create()
+        # Preprocess images
+        img1 = preprocess_image(img1)
+        img2 = preprocess_image(img2)
 
+        orb = cv2.ORB_create()
         kp1, des1 = orb.detectAndCompute(img1, None)
         kp2, des2 = orb.detectAndCompute(img2, None)
 
-        if des1 is None or des2 is None:
+        if des1 is None or des2 is None or len(kp1) == 0 or len(kp2) == 0:
+            print("No keypoints found in one or both images.")
             return 0.0
 
         bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
         matches = bf.match(des1, des2)
 
-        # Calculate similarity score based on good matches
-        matches = sorted(matches, key=lambda x: x.distance)
-        good_matches = [m for m in matches if m.distance < 50]
-
+        good_matches = [m for m in matches if m.distance < 60]
         match_ratio = len(good_matches) / max(len(kp1), len(kp2))
         similarity = round(match_ratio * 100, 2)
 
@@ -79,15 +97,14 @@ def compare():
         return jsonify({"error": "Invalid image data"}), 400
 
     signature_region = extract_signature_region(document_img)
-
     if signature_region is None:
-        return jsonify({"error": "No signature found in document image"}), 400
+        return jsonify({"error": "Could not extract signature region"}), 400
 
     similarity = compare_signatures_orb(signature_region, reference_img)
 
     return jsonify({
         "similarity": similarity,
-        "match": similarity >= 40  # ORB match threshold
+        "match": similarity >= 35  # You can adjust this threshold
     }), 200
 
 if __name__ == '__main__':
