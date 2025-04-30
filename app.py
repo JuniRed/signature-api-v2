@@ -21,18 +21,40 @@ def decode_base64_to_image(base64_string):
 
 def extract_signature_region(image):
     try:
-        _, thresh = cv2.threshold(image, 180, 255, cv2.THRESH_BINARY_INV)
-        contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        
-        if contours:
-            largest = max(contours, key=cv2.contourArea)
-            x, y, w, h = cv2.boundingRect(largest)
-            signature = image[y:y+h, x:x+w]
-            return signature
-        return None
+        # Adaptive thresholding instead of fixed threshold
+        blurred = cv2.GaussianBlur(image, (5, 5), 0)
+        thresh = cv2.adaptiveThreshold(
+            blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+            cv2.THRESH_BINARY_INV, 11, 2
+        )
+
+        # Morphology to clean up noise
+        kernel = np.ones((3, 3), np.uint8)
+        morph = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel, iterations=2)
+
+        contours, _ = cv2.findContours(morph, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        # Filter contours by size and aspect ratio (signature tends to be wide and not too tall)
+        possible_signatures = []
+        for cnt in contours:
+            x, y, w, h = cv2.boundingRect(cnt)
+            aspect_ratio = w / float(h)
+            area = cv2.contourArea(cnt)
+
+            if 2 < aspect_ratio < 8 and 1000 < area < 20000:
+                possible_signatures.append((x, y, w, h))
+
+        if not possible_signatures:
+            return None
+
+        # Choose the largest one (by area)
+        x, y, w, h = max(possible_signatures, key=lambda b: b[2] * b[3])
+        return image[y:y+h, x:x+w]
+
     except Exception as e:
         print(f"Error extracting signature: {e}")
         return None
+
 
 def compare_images(img1, img2):
     try:
