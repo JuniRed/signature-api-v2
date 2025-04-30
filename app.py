@@ -21,35 +21,25 @@ def decode_base64_to_image(base64_string):
 
 def extract_signature_region(image):
     try:
-        # Preprocessing
-        blurred = cv2.GaussianBlur(image, (5, 5), 0)
-        thresh = cv2.adaptiveThreshold(
-            blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-            cv2.THRESH_BINARY_INV, 11, 2
-        )
+        height, width = image.shape
+        # Crop the bottom 25% of the document
+        crop_y_start = int(height * 0.75)
+        cropped = image[crop_y_start:height, 0:width]
 
-        # Morphological operations to clean noise
-        kernel = np.ones((3, 3), np.uint8)
-        morph = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel, iterations=2)
+        # Threshold to extract ink
+        _, thresh = cv2.threshold(cropped, 200, 255, cv2.THRESH_BINARY_INV)
 
-        contours, _ = cv2.findContours(morph, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        # Find contours (ink areas)
+        contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-        possible_signatures = []
-        for cnt in contours:
-            x, y, w, h = cv2.boundingRect(cnt)
-            aspect_ratio = w / float(h)
-            area = cv2.contourArea(cnt)
-
-            # Filter likely signature shapes
-            if 2 < aspect_ratio < 8 and 1000 < area < 20000:
-                possible_signatures.append((x, y, w, h))
-
-        if not possible_signatures:
-            return None
-
-        # Get largest matching contour
-        x, y, w, h = max(possible_signatures, key=lambda b: b[2] * b[3])
-        return image[y:y+h, x:x+w]
+        if contours:
+            # Take the largest contour assuming it's the signature
+            x, y, w, h = cv2.boundingRect(max(contours, key=cv2.contourArea))
+            signature = cropped[y:y+h, x:x+w]
+            return signature
+        else:
+            # Fallback: return the entire bottom-cropped area
+            return cropped
 
     except Exception as e:
         print(f"Error extracting signature: {e}")
@@ -57,7 +47,7 @@ def extract_signature_region(image):
 
 def compare_images(img1, img2):
     try:
-        # Resize reference to match extracted signature size
+        # Resize to same size
         if img1.shape != img2.shape:
             img2 = cv2.resize(img2, (img1.shape[1], img1.shape[0]))
         diff = cv2.absdiff(img1, img2)
@@ -94,9 +84,9 @@ def compare():
 
     return jsonify({
         "similarity": similarity,
-        "match": similarity >= 80  # you can adjust this threshold
+        "match": similarity >= 80  # Threshold for match decision
     }), 200
 
 if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 5000))  # For Render/Railway deployment
+    port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port)
